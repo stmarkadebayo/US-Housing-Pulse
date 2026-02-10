@@ -63,6 +63,32 @@ def test_clean_and_merge_skips_when_city_missing():
     print("✅ Clean-and-merge (no city_full) passed")
 
 
+def test_clean_and_merge_handles_metro_suffix_and_mapping(tmp_path):
+    df = pd.DataFrame({
+        "city_full": [
+            "Atlanta-Sandy Springs-Alpharetta",  # maps to roswell
+            "New York-Newark-Jersey City",       # matches metro_full sans state suffix
+        ]
+    })
+    metros = pd.DataFrame({
+        "metro_full": [
+            "Atlanta-Sandy Springs-Roswell, GA",
+            "New York-Newark-Jersey City, NY-NJ",
+        ],
+        "lat": [33.7490, 40.7128],
+        "lng": [-84.3880, -74.0060],
+        "population": [6000000, 19000000],
+    })
+    metros_path = tmp_path / "metros.csv"
+    metros.to_csv(metros_path, index=False)
+
+    result = clean_and_merge(df, metros_path=str(metros_path))
+    assert result["lat"].notna().all()
+    assert result["lng"].notna().all()
+    assert result.shape[0] == 2
+    print("✅ Clean-and-merge suffix + mapping test passed")
+
+
 # =========================
 # feature_engineering – unit tests
 # =========================
@@ -88,8 +114,8 @@ def test_target_encode_applies_mapping():
     train = pd.DataFrame({"city_full": ["A", "B", "A"], "price": [100, 200, 300]})
     eval = pd.DataFrame({"city_full": ["A", "B"]})
     train, eval, te = target_encode(train, eval, "city_full", "price")
-    assert "city_full_encoded" in train.columns
-    assert eval["city_full_encoded"].notnull().all()
+    assert "city_encoded" in train.columns
+    assert eval["city_encoded"].notnull().all()
     assert te is not None
     print("✅ Target encoding test passed")
 
@@ -139,8 +165,8 @@ def test_full_pipeline_integration(tmp_path):
     )
 
 
-    assert {"year", "zipcode_freq", "city_full_encoded"}.issubset(out_train.columns)
-    assert {"year", "zipcode_freq", "city_full_encoded"}.issubset(out_eval.columns)
+    assert {"year", "zipcode_freq", "city_encoded"}.issubset(out_train.columns)
+    assert {"year", "zipcode_freq", "city_encoded"}.issubset(out_eval.columns)
     assert freq_map is not None
     assert te is not None
     print("✅ Full pipeline integration test passed")

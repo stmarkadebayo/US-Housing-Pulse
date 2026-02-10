@@ -65,10 +65,11 @@ def predict(
         df["zipcode_freq"] = df["zipcode"].map(freq_map).fillna(0)
         df = df.drop(columns=["zipcode"], errors="ignore")
 
-    # Target encoding (city_full → city_full_encoded)
+    # Target encoding (city_full → city_encoded)
     if Path(target_encoder_path).exists() and "city_full" in df.columns:
         target_encoder = load(target_encoder_path)
-        df["city_full_encoded"] = target_encoder.transform(df["city_full"])
+        encoded = target_encoder.transform(df["city_full"])
+        df["city_encoded"] = encoded
         df = df.drop(columns=["city_full"], errors="ignore")
 
     # Drop leakage columns

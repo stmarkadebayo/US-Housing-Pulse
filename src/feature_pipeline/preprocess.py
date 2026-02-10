@@ -25,16 +25,16 @@ RAW_DIR = Path("data/raw")
 PROCESSED_DIR = Path("data/processed")
 PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
-# Manual fixes for known mismatches (normalized form)
+# Manual fixes for known mismatches (notebook-aligned labels)
 CITY_MAPPING = {
-    "las vegas-henderson-paradise": "las vegas-henderson-north las vegas",
-    "denver-aurora-lakewood": "denver-aurora-centennial",
-    "houston-the woodlands-sugar land": "houston-pasadena-the woodlands",
-    "austin-round rock-georgetown": "austin-round rock-san marcos",
-    "miami-fort lauderdale-pompano beach": "miami-fort lauderdale-west palm beach",
-    "san francisco-oakland-berkeley": "san francisco-oakland-fremont",
-    "dc_metro": "washington-arlington-alexandria",
-    "atlanta-sandy springs-alpharetta": "atlanta-sandy springs-roswell",
+    "Las Vegas-Henderson-Paradise": "Las Vegas-Henderson-North Las Vegas",
+    "Denver-Aurora-Lakewood": "Denver-Aurora-Centennial",
+    "Houston-The Woodlands-Sugar Land": "Houston-Pasadena-The Woodlands",
+    "Austin-Round Rock-Georgetown": "Austin-Round Rock-San Marcos",
+    "Miami-Fort Lauderdale-Pompano Beach": "Miami-Fort Lauderdale-West Palm Beach",
+    "San Francisco-Oakland-Berkeley": "San Francisco-Oakland-Fremont",
+    "DC_Metro": "Washington-Arlington-Alexandria",
+    "Atlanta-Sandy Springs-Alpharetta": "Atlanta-Sandy Springs-Roswell",
 }
 
 
@@ -48,6 +48,17 @@ def normalize_city(s: str) -> str:
     return s
 
 
+def canonical_metro_name(s: str) -> str:
+    """
+    Normalize metro labels to a merge key.
+    Example: "New York-Newark-Jersey City, NY-NJ" -> "new york-newark-jersey city"
+    """
+    if pd.isna(s):
+        return s
+    s = normalize_city(s)
+    return re.sub(r",.*$", "", s).strip()
+
+
 def clean_and_merge(df: pd.DataFrame, metros_path: str | None = "data/raw/usmetros.csv") -> pd.DataFrame:
     """
     Normalize city names, optionally merge lat/lng from metros dataset.
@@ -58,16 +69,10 @@ def clean_and_merge(df: pd.DataFrame, metros_path: str | None = "data/raw/usmetr
         print("⚠️ Skipping city merge: no 'city_full' column present.")
         return df
 
-    # Normalize city_full
-    df["city_full"] = df["city_full"].apply(normalize_city)
-    # Apply mapping
-    norm_mapping = {normalize_city(k): normalize_city(v) for k, v in CITY_MAPPING.items()}
-    df["city_full"] = df["city_full"].replace(norm_mapping)
-
-    # 🚨 If lat/lng already present, skip merge
-    if {"lat", "lng"}.issubset(df.columns):
-        print("⚠️ Skipping lat/lng merge: already present in DataFrame.")
-        return df
+    df = df.copy()
+    # Keep notebook city labels, and merge via canonical keys.
+    df["city_full"] = df["city_full"].replace(CITY_MAPPING)
+    df["city_key"] = df["city_full"].apply(canonical_metro_name)
 
     # If no metros file provided / exists, skip merge
     if not metros_path or not Path(metros_path).exists():
@@ -80,10 +85,19 @@ def clean_and_merge(df: pd.DataFrame, metros_path: str | None = "data/raw/usmetr
         print("⚠️ Skipping lat/lng merge: metros file missing required columns.")
         return df
 
-    metros["metro_full"] = metros["metro_full"].apply(normalize_city)
-    df = df.merge(metros[["metro_full", "lat", "lng"]],
-                  how="left", left_on="city_full", right_on="metro_full")
-    df.drop(columns=["metro_full"], inplace=True, errors="ignore")
+    metros["metro_key"] = metros["metro_full"].apply(canonical_metro_name)
+    # Some metro names repeat across states (e.g., Albany). Keep the largest by population.
+    if "population" in metros.columns:
+        metros = metros.sort_values("population", ascending=False)
+    metros = metros.drop_duplicates(subset=["metro_key"], keep="first")
+
+    df = df.merge(
+        metros[["metro_key", "lat", "lng"]],
+        how="left",
+        left_on="city_key",
+        right_on="metro_key",
+    )
+    df.drop(columns=["city_key", "metro_key"], inplace=True, errors="ignore")
 
     missing = df[df["lat"].isnull()]["city_full"].unique()
     if len(missing) > 0:

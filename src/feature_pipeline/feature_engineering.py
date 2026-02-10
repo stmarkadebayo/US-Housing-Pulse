@@ -4,17 +4,13 @@ Feature engineering: date parts, frequency encoding, target encoding, drop leaka
 - Reads cleaned train/eval CSVs
 - Applies feature engineering
 - Saves feature-engineered CSVs
-- ALSO saves fitted encoders for inference
 """
 
 from pathlib import Path
 import pandas as pd
 from category_encoders import TargetEncoder
-from joblib import dump #joblib.dump saves encoders/mappings to disk (important for reusing at inference).
 
 PROCESSED_DIR = Path("data/processed")
-MODELS_DIR = Path("models")
-MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ---------- feature functions ----------
@@ -43,12 +39,9 @@ def frequency_encode(train: pd.DataFrame, eval: pd.DataFrame, col: str):
 #Uses target encoding (replace category with average of target variable).
 #Fitted only on train (prevents leakage).
 def target_encode(train: pd.DataFrame, eval: pd.DataFrame, col: str, target: str):
-    """
-    Use TargetEncoder on `col`, consistently name as <col>_encoded.
-    For city_full → city_full_encoded (keeps schema aligned with inference).
-    """
+    """Use TargetEncoder on `col` and output notebook-aligned encoded columns."""
     te = TargetEncoder(cols=[col])
-    encoded_col = f"{col}_encoded" if col != "city_full" else "city_full_encoded"
+    encoded_col = "city_encoded" if col == "city_full" else f"{col}_encoded"
     train[encoded_col] = te.fit_transform(train[col], train[target])
     eval[encoded_col] = te.transform(eval[col])
     return train, eval, te
@@ -64,8 +57,8 @@ def drop_unused_columns(train: pd.DataFrame, eval: pd.DataFrame):
 
 # ---------- pipeline ----------
 
-#Handles full pipeline: 
-#reads cleaned CSVs → applies feature engineering → saves engineered data + encoders.
+# Handles full pipeline:
+# reads cleaned CSVs → applies feature engineering → saves engineered data.
 def run_feature_engineering(
     in_train_path: Path | str | None = None,
     in_eval_path: Path | str | None = None,
@@ -73,7 +66,7 @@ def run_feature_engineering(
     output_dir: Path | str = PROCESSED_DIR,
 ):
     """
-    Run feature engineering and write outputs + encoders to disk.
+    Run feature engineering and write outputs to disk.
     Applies the same transformations to train, eval, and holdout.
     """
     output_dir = Path(output_dir)
@@ -105,14 +98,12 @@ def run_feature_engineering(
     if "zipcode" in train_df.columns:
         train_df, eval_df, freq_map = frequency_encode(train_df, eval_df, "zipcode")
         holdout_df["zipcode_freq"] = holdout_df["zipcode"].map(freq_map).fillna(0)
-        dump(freq_map, MODELS_DIR / "freq_encoder.pkl")   # save mapping
 
     # Target encode city_full (fit on train only)
     target_encoder = None
     if "city_full" in train_df.columns:
         train_df, eval_df, target_encoder = target_encode(train_df, eval_df, "city_full", "price")
-        holdout_df["city_full_encoded"] = target_encoder.transform(holdout_df["city_full"])
-        dump(target_encoder, MODELS_DIR / "target_encoder.pkl")  # save encoder
+        holdout_df["city_encoded"] = target_encoder.transform(holdout_df["city_full"])
 
     # Drop leakage / raw categoricals
     train_df, eval_df = drop_unused_columns(train_df, eval_df)
@@ -130,7 +121,6 @@ def run_feature_engineering(
     print("   Train shape:", train_df.shape)
     print("   Eval  shape:", eval_df.shape)
     print("   Holdout shape:", holdout_df.shape)
-    print("   Encoders saved to models/")
 
     return train_df, eval_df, holdout_df, freq_map, target_encoder
 
